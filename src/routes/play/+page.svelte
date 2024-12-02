@@ -1,14 +1,46 @@
 <script lang="ts">
     import { socket, gameId, connected } from '$lib/stores/gameStore';
+    import { onMount } from 'svelte';
+    import { browser } from '$app/environment';
 
     let inputGameId = '';
     let playerName = '';
     let joinStatus = '';
     let gameStarted = false;
 
+    onMount(() => {
+        if (browser) {
+            const savedGameId = localStorage.getItem('playerGameId');
+            const savedName = localStorage.getItem('playerName');
+            if (savedGameId && savedName) {
+                playerName = savedName;
+                socket?.emit('reconnect-attempt', {
+                    gameId: savedGameId,
+                    playerName: savedName,
+                    isHost: false
+                });
+            }
+        }
+    });
+
     function joinGame() {
         if (playerName.trim() && inputGameId.trim()) {
+            if (browser) {
+                localStorage.setItem('playerGameId', inputGameId);
+                localStorage.setItem('playerName', playerName);
+            }
             socket?.emit('join-game', inputGameId, playerName);
+        }
+    }
+
+    function leaveGame() {
+        socket?.emit('leave-game');
+        gameId.set(null);
+        joinStatus = '';
+        gameStarted = false;
+        if (browser) {
+            localStorage.removeItem('playerGameId');
+            localStorage.removeItem('playerName');
         }
     }
 
@@ -28,6 +60,24 @@
     socket?.on('game-started', () => {
         gameStarted = true;
     });
+
+    socket?.on('game-ended', () => {
+        gameId.set(null);
+        joinStatus = 'Game ended by host';
+        if (browser) {
+            localStorage.removeItem('playerGameId');
+            localStorage.removeItem('playerName');
+        }
+    });
+
+    socket?.on('kicked-from-game', () => {
+        gameId.set(null);
+        joinStatus = 'You have been kicked from the game';
+        if (browser) {
+            localStorage.removeItem('playerGameId');
+            localStorage.removeItem('playerName');
+        }
+    });
 </script>
 
 <main class="container">
@@ -46,6 +96,9 @@
                 <div class="waiting-room">
                     <h2>{joinStatus}</h2>
                     <p>Waiting for other players to join...</p>
+                    <button class="leave-button" on:click={leaveGame}>
+                        Leave Game
+                    </button>
                 </div>
             {/if}
         {:else}
@@ -109,6 +162,11 @@
         background: #dc3545;
         font-size: 2rem;
         padding: 2rem 4rem;
+    }
+
+    .leave-button {
+        background: #dc3545;
+        margin-top: 1rem;
     }
 
     .status {
