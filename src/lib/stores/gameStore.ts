@@ -34,6 +34,7 @@ if (browser) {
         const currentGameId = get(gameId);
         if (state.hostId === socket.id && currentGameId) {
             localStorage.setItem('hostGameId', currentGameId);
+            localStorage.setItem('gameStarted', state.started.toString());
         }
     });
 

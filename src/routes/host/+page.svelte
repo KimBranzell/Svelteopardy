@@ -1,4 +1,8 @@
 <script lang="ts">
+    interface Buzz {
+        playerName: string;
+        timestamp: number;
+    }
     import { socket, gameId, connected } from '$lib/stores/gameStore';
     import { onMount } from 'svelte';
     import { browser } from '$app/environment';
@@ -6,6 +10,9 @@
     let currentGameId: string | null = null;
     let connectedPlayers: Array<{id: string, name: string}> = [];
     let kickedPlayers: string[] = [];
+    let buzzes: Array<{playerName: string, position: number}> = [];
+    let gameStarted = false;
+
 
     gameId.subscribe(value => {
         currentGameId = value;
@@ -42,6 +49,7 @@
     function startGame() {
         if (currentGameId) {
             socket?.emit('start-game', currentGameId);
+            gameStarted = true;
         }
     }
 
@@ -51,6 +59,13 @@
             gameId.set(null);
             connectedPlayers = [];
             kickedPlayers = [];
+        }
+    }
+
+    function resetBuzzers() {
+        if ($gameId) {
+            socket?.emit('reset-buzzer', $gameId);
+            buzzes = [];
         }
     }
 
@@ -64,7 +79,7 @@
 
     function reinvitePlayer(playerName: string) {
         if (currentGameId) {
-            socket?.emit('reinvite-player', currentGameId, playerName);
+            socket?.emit('reinvite-player', $gameId, playerName);
             kickedPlayers = kickedPlayers.filter(p => p !== playerName);
         }
     }
@@ -92,9 +107,12 @@
     });
 
     socket?.on('game-state-updated', (state) => {
-        if (state.kickedPlayers) {
-            kickedPlayers = state.kickedPlayers;
-        }
+        gameStarted = state.started;
+        kickedPlayers = state.kickedPlayers || [];
+        buzzes = (state.buzzes || []).map((buzz: Buzz, index: number) => ({
+            playerName: buzz.playerName,
+            position: index + 1
+        }));
     });
 
     socket?.on('game-not-found', () => {
@@ -102,6 +120,14 @@
             localStorage.removeItem('hostGameId');
             gameId.set(null);
         }
+    });
+
+    socket?.on('game-started', () => {
+        gameStarted = true;
+    });
+
+    socket?.on('buzz-received', (buzz) => {
+        buzzes = [...buzzes, buzz];
     });
 </script>
 
@@ -127,6 +153,26 @@
                             </li>
                         {/each}
                     </ul>
+
+                    {#if gameStarted}
+                        <div class="buzz-panel">
+                            <h3>Buzzer Queue</h3>
+                            {#if buzzes.length > 0}
+                                <ul class="buzz-list">
+                                    {#each buzzes as buzz}
+                                        <li>
+                                            {buzz.position}. {buzz.playerName}
+                                        </li>
+                                    {/each}
+                                </ul>
+                                <button class="reset-button" on:click={resetBuzzers}>
+                                    Reset Buzzers
+                                </button>
+                            {:else}
+                                <p>Waiting for players to buzz...</p>
+                            {/if}
+                        </div>
+                    {/if}
                 </div>
 
                 {#if kickedPlayers.length > 0}

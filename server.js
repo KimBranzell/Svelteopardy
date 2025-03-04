@@ -20,9 +20,13 @@ function createGameState(hostId) {
         started: false,
         hostId: hostId,
         createdAt: Date.now(),
-        lastActivity: Date.now()
+        lastActivity: Date.now(),
+        buzzes: [],
+        resetCount: 0,
+        buzzState: {}  // Initialize the buzzState object
     };
 }
+
 
 
 function updateGameState(gameId) {
@@ -83,6 +87,10 @@ io.on('connection', socket => {
     if (!socket.handshake.headers.referer?.includes('vite')) {
         log('New client connection established');
     }
+
+    /**
+     * Game creation management
+     */
 
     socket.on('create-game', () => {
         const gameId = generateGameId();
@@ -221,9 +229,7 @@ io.on('connection', socket => {
         }
     });
 
-    socket.on('reconnect-attempt', ({ gameId, isHost }) => {
-        console.log('Reconnect attempt:', { gameId, isHost });
-        console.log('Current games:', [...games.entries()]);
+    socket.on('reconnect-attempt', ({ gameId, isHost, playerName }) => {
         const game = games.get(gameId);
         if (game) {
             if (isHost) {
@@ -231,20 +237,67 @@ io.on('connection', socket => {
                 socket.join(gameId);
                 socket.emit('game-created', gameId);
                 socket.emit('players-updated', game.players);
-                updateGameState(gameId);
-                log(`Host reconnected to game ${gameId}`);
-            }
-        } else {
-            // If game doesn't exist, create it for the host
-            if (isHost) {
-                games.set(gameId, createGameState(socket.id));
+                socket.emit('game-state-updated', {
+                    players: game.players,
+                    kickedPlayers: kickedPlayers.get(gameId) || [],
+                    hostId: game.hostId,
+                    started: game.started,
+                    buzzes: game.buzzes
+                });
+            } else if (playerName) {
                 socket.join(gameId);
-                socket.emit('game-created', gameId);
-                log(`Game ${gameId} recreated for host`);
-            } else {
-                socket.emit('game-not-found');
+                socket.emit('player-state-sync', {
+                    gameStarted: game.started,
+                    hasBuzzed: game.buzzes.some(buzz => buzz.playerName === playerName)
+                });
             }
         }
+    });
+
+    /**
+     * Main Game event handlers
+     */
+
+    socket.on('player-buzz', ({ gameId, playerName }) => {
+        const game = games.get(gameId);
+        if (game && game.started) {
+            game.buzzState[playerName] = true;
+            game.buzzes.push({
+                playerName,
+                timestamp: Date.now()
+            });
+            io.to(gameId).emit('game-state-updated', {
+                players: game.players,
+                kickedPlayers: kickedPlayers.get(gameId) || [],
+                hostId: game.hostId,
+                started: game.started,
+                buzzes: game.buzzes,
+                buzzState: game.buzzState
+            });
+        }
+    });
+
+
+    socket.on('reset-buzzer', (gameId) => {
+        const game = games.get(gameId);
+        if (game && game.hostId === socket.id) {
+            // Clear buzzes
+            game.buzzes = [];
+
+            // First update the host's view
+            socket.emit('players-updated', game.players);
+
+            // Then send the complete state update to all clients
+            const fullState = {
+                players: game.players,
+                kickedPlayers: kickedPlayers.get(gameId) || [],
+                hostId: game.hostId,
+                started: game.started,
+                buzzes: []
+            };
+
+            io.to(gameId).emit('game-state-updated', fullState);
+            }
     });
 });
 

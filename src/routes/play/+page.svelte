@@ -1,4 +1,9 @@
 <script lang="ts">
+    interface Buzz {
+        playerName: string;
+        timestamp: number;
+    }
+
     import { socket, gameId, connected } from '$lib/stores/gameStore';
     import { onMount } from 'svelte';
     import { browser } from '$app/environment';
@@ -7,6 +12,19 @@
     let playerName = '';
     let joinStatus = '';
     let gameStarted = false;
+    let hasBuzzed = false;
+    let lastResetTimestamp = 0;
+    let lastResetCount = 0;
+
+    function buzz() {
+        if (!hasBuzzed && gameStarted) {
+            socket?.emit('player-buzz', {
+                gameId: $gameId,
+                playerName
+            });
+            hasBuzzed = true;
+        }
+    }
 
     onMount(() => {
         if (browser) {
@@ -59,6 +77,7 @@
 
     socket?.on('game-started', () => {
         gameStarted = true;
+        hasBuzzed = false;
     });
 
     socket?.on('game-ended', () => {
@@ -70,6 +89,16 @@
         }
     });
 
+    socket?.on('game-state-updated', (state) => {
+        gameStarted = state.started;
+        if (state.resetCount && state.resetCount > lastResetCount) {
+            hasBuzzed = false;
+            lastResetCount = state.resetCount;
+        } else {
+            hasBuzzed = state.buzzes?.some((buzz: Buzz) => buzz.playerName === playerName) || false;
+        }
+    });
+
     socket?.on('kicked-from-game', () => {
         gameId.set(null);
         joinStatus = 'You have been kicked from the game';
@@ -78,6 +107,21 @@
             localStorage.removeItem('playerName');
         }
     });
+
+    socket?.on('player-state-sync', (state) => {
+        gameStarted = state.gameStarted;
+        hasBuzzed = state.hasBuzzed;
+    });
+
+    socket?.on('force-buzz-update', (state) => {
+        hasBuzzed = false;
+    });
+
+    socket?.on('buzz-reset', () => {
+        console.log('Player received buzz reset');
+        hasBuzzed = false;
+    });
+
 </script>
 
 <main class="container">
@@ -88,8 +132,15 @@
             {#if gameStarted}
                 <div class="game-view">
                     <h2>Game Started!</h2>
-                    <div class="buzzer-placeholder">
-                        <button class="buzzer">BUZZ!</button>
+                    <div class="buzzer-container">
+                        <button
+                            class="buzzer"
+                            class:buzzed={hasBuzzed}
+                            on:click={buzz}
+                            disabled={hasBuzzed}
+                        >
+                            {hasBuzzed ? 'BUZZED!' : 'BUZZ!'}
+                        </button>
                     </div>
                 </div>
             {:else}
@@ -158,10 +209,37 @@
         border-radius: 8px;
     }
 
+    .buzzer-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-top: 2rem;
+    }
+
     .buzzer {
+        width: 200px;
+        height: 200px;
+        border-radius: 50%;
         background: #dc3545;
+        color: white;
         font-size: 2rem;
-        padding: 2rem 4rem;
+        font-weight: bold;
+        border: none;
+        cursor: pointer;
+        transition: transform 0.1s, background-color 0.3s;
+    }
+
+    .buzzer:active {
+        transform: scale(0.95);
+    }
+
+    .buzzer:hover:not(:disabled) {
+        background: #c82333;
+    }
+
+    .buzzer.buzzed {
+        background: #6c757d;
+        cursor: not-allowed;
     }
 
     .leave-button {
