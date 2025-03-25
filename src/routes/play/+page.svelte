@@ -4,9 +4,24 @@
         timestamp: number;
     }
 
+    interface GameBoard {
+        categories: Array<{
+            name: string;
+            questions: Array<{
+                value: number;
+                question: string;
+                answer: string;
+                answered: boolean;
+            }>;
+        }>;
+    }
+
     import { socket, gameId, connected } from '$lib/stores/gameStore';
     import { onMount } from 'svelte';
     import { browser } from '$app/environment';
+    import GameBoardComponent from '$lib/components/GameBoard.svelte';
+    import type { GameBoard as GameBoardType, CurrentQuestion } from '$lib/data/gameBoard';
+
 
     let inputGameId = '';
     let playerName = '';
@@ -16,6 +31,8 @@
     let lastResetTimestamp = 0;
     let lastResetCount = 0;
     let scores: Record<string, number> = {};
+    let gameBoard: GameBoardType | null = null;
+    let currentQuestion: CurrentQuestion | null = null;
 
     function buzz() {
         if (!hasBuzzed && gameStarted) {
@@ -95,6 +112,8 @@
         console.log('Current lastResetCount:', lastResetCount, 'New resetCount:', state.resetCount);
 
         gameStarted = state.started;
+        gameBoard = state.gameBoard;
+        currentQuestion = state.currentQuestion;
 
         scores = state.scores || {};
 
@@ -152,6 +171,17 @@
         hasBuzzed = false;
     });
 
+    function selectQuestion() {}
+    function markQuestionAnswered() {}
+
+    // Fix the scores display bug
+    function getPlayerClass(name: string) {
+        return name === playerName ? 'my-score' : '';
+    }
+    function debugObject(obj: any) {
+        console.log('Debug object:', obj);
+        return obj;
+    }
 </script>
 
 <main class="container">
@@ -162,27 +192,44 @@
             {#if gameStarted}
                 <div class="game-view">
                     <h2>Game Started!</h2>
+
+                    <!-- Log the gameBoard object to debug -->
+                    <pre style="display: none;">{debugObject(gameBoard)}</pre>
+
+                    <!-- Only render GameBoard if gameBoard is not null -->
+                    {#if gameBoard}
+                        <GameBoardComponent
+                            gameBoard={gameBoard}
+                            currentQuestion={currentQuestion}
+                            onSelectQuestion={selectQuestion}
+                            onMarkAnswered={markQuestionAnswered}
+                            isHost={false}
+                        />
+                    {:else}
+                        <div class="loading">Waiting for game board...</div>
+                    {/if}
                     <div class="scores-panel">
                         <h3>Scores</h3>
                         <div class="scores-container">
-                            {#each Object.entries(scores) as [playerName, score]}
-                                <div class="player-score" class:my-score={playerName === playerName}>
-                                    <span class="player-name">{playerName}</span>
+                            {#each Object.entries(scores) as [name, score]}
+                                <div class="player-score" class:my-score={name === playerName}>
+                                    <span class="player-name">{name}</span>
                                     <span class="score">${score}</span>
                                 </div>
                             {/each}
                         </div>
                     </div>
+                    {#if currentQuestion}
                     <div class="buzzer-container">
                         <button
                             class="buzzer"
                             class:buzzed={hasBuzzed}
-                            on:click={buzz}
                             disabled={hasBuzzed}
-                        >
-                            {hasBuzzed ? 'BUZZED!' : 'BUZZ!'}
+                            on:click={buzz}>
+                            {hasBuzzed ? 'Buzzed' : 'Buzz'}
                         </button>
                     </div>
+                    {/if}
                 </div>
             {:else}
                 <div class="waiting-room">

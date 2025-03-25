@@ -6,6 +6,8 @@
     import { socket, gameId, connected } from '$lib/stores/gameStore';
     import { onMount } from 'svelte';
     import { browser } from '$app/environment';
+    import GameBoard from '$lib/components/GameBoard.svelte';
+
 
     let currentGameId: string | null = null;
     let connectedPlayers: Array<{id: string, name: string}> = [];
@@ -14,7 +16,9 @@
     let gameStarted = false;
     let scores: Record<string, number> = {};
     let selectedPlayer: string | null = null;
-    let pointAmount = 100; // Default point amount
+    let pointAmount = 100;
+    let gameBoard: any = null;
+    let currentQuestion: any = null;
 
 
     gameId.subscribe(value => {
@@ -117,6 +121,8 @@
             position: index + 1
         }));
         scores = state.scores || {};
+        gameBoard = state.gameBoard;
+        currentQuestion = state.currentQuestion;
     });
 
     socket?.on('scores-updated', (updatedScores) => {
@@ -170,6 +176,26 @@
             });
         }
     }
+
+    function selectQuestion(categoryIndex: number, questionIndex: number) {
+        if ($gameId) {
+            socket?.emit('select-question', {
+                gameId: $gameId,
+                categoryIndex,
+                questionIndex
+            });
+        }
+    }
+
+    function markQuestionAnswered(categoryIndex: number, questionIndex: number) {
+        if ($gameId) {
+            socket?.emit('mark-question-answered', {
+                gameId: $gameId,
+                categoryIndex,
+                questionIndex
+            });
+        }
+    }
 </script>
 
 <main class="container">
@@ -196,6 +222,13 @@
                     </ul>
 
                     {#if gameStarted}
+                            <GameBoard
+                                {gameBoard}
+                                {currentQuestion}
+                                onSelectQuestion={selectQuestion}
+                                onMarkAnswered={markQuestionAnswered}
+                                isHost={true}
+                            />
                         <div class="buzz-panel">
                             <h3>Buzzer Queue</h3>
                             {#if buzzes.length > 0}

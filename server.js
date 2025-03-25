@@ -3,6 +3,10 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { generateGameId } from './src/lib/utils/gameId.js';
+import { sampleGameBoard } from './src/lib/data/gameBoard.js';
+
+console.log('Sample game board loaded:', sampleGameBoard ? 'yes' : 'no');
+console.log('Categories:', sampleGameBoard?.categories?.length || 0);
 
 const app = express();
 const server = createServer(app);
@@ -13,8 +17,9 @@ const playerSessions = new Map();
 const kickedPlayers = new Map(); // Maps gameId to array of kicked player names
 
 
-// Add game persistence with timestamp
 function createGameState(hostId) {
+    console.log('Creating new game state with sample board:', sampleGameBoard ? 'Yes' : 'No');
+
     return {
         players: [],
         started: false,
@@ -24,7 +29,9 @@ function createGameState(hostId) {
         buzzes: [],
         resetCount: 0,
         buzzState: {},
-        scores: {}
+        scores: {},
+        gameBoard: JSON.parse(JSON.stringify(sampleGameBoard)), // Deep copy
+        currentQuestion: null
     };
 }
 
@@ -41,7 +48,9 @@ function updateGameState(gameId) {
             buzzes: game.buzzes,
             buzzState: game.buzzState,
             resetCount: game.resetCount,
-            scores: game.scores  // Include scores in game state
+            scores: game.scores || {},
+            gameBoard: game.gameBoard,  // Make sure this is included
+            currentQuestion: game.currentQuestion
         };
         io.to(gameId).emit('game-state-updated', gameState);
     }
@@ -151,9 +160,22 @@ io.on('connection', socket => {
 
     socket.on('start-game', (gameId) => {
         const game = games.get(gameId);
-        if (game && game.players.length === 3) {
+        if (game && game.hostId === socket.id) {
             game.started = true;
             io.to(gameId).emit('game-started');
+
+            // Ensure game board is available
+            if (!game.gameBoard) {
+                game.gameBoard = JSON.parse(JSON.stringify(sampleGameBoard));
+            }
+
+            // Log game board for debugging
+            console.log('Game board initialized:', game.gameBoard ? 'Yes' : 'No');
+            console.log('Game board categories:', game.gameBoard?.categories?.length || 0);
+
+            // Send game state update with board
+            updateGameState(gameId);
+
             log(`Game ${gameId} started with players: ${game.players.map(p => p.name).join(', ')}`);
         }
     });
@@ -310,9 +332,12 @@ io.on('connection', socket => {
                 kickedPlayers: kickedPlayers.get(gameId) || [],
                 hostId: game.hostId,
                 started: game.started,
-                buzzes: game.buzzes, // This should be an empty array now
-                buzzState: game.buzzState, // This should be an empty object now
-                resetCount: game.resetCount
+                buzzes: game.buzzes,
+                buzzState: game.buzzState,
+                resetCount: game.resetCount,
+                scores: game.scores || {},
+                gameBoard: game.gameBoard,
+                currentQuestion: game.currentQuestion
             };
 
             // Delay the game-state-updated to ensure buzz-reset is processed first
@@ -346,6 +371,32 @@ io.on('connection', socket => {
 
             // Also include scores in the game state update
             updateGameState(gameId);
+        }
+    });
+
+    // Update the select-question handler
+    socket.on('select-question', ({ gameId, categoryIndex, questionIndex }) => {
+        const game = games.get(gameId);
+        if (game && game.hostId === socket.id) {
+            const category = game.gameBoard.categories[categoryIndex];
+            const question = category?.questions[questionIndex];
+
+            if (question && !question.revealed) {
+                // Mark the question as revealed
+                question.revealed = true;
+
+                // Set as current question
+                game.currentQuestion = {
+                    categoryIndex,
+                    questionIndex,
+                    text: question.text,
+                    answer: question.answer,
+                    pointValue: question.pointValue
+                };
+
+                // Update game state
+                updateGameState(gameId);
+            }
         }
     });
 });
