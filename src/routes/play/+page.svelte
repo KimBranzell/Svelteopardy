@@ -90,13 +90,36 @@
     });
 
     socket?.on('game-state-updated', (state) => {
+        console.log('Received game state update:', state);
+        console.log('Current lastResetCount:', lastResetCount, 'New resetCount:', state.resetCount);
+
         gameStarted = state.started;
+
+        // More explicit check for buzz reset
         if (state.resetCount && state.resetCount > lastResetCount) {
+            console.log('Reset detected via resetCount');
             hasBuzzed = false;
             lastResetCount = state.resetCount;
+        } else if (Array.isArray(state.buzzes) && state.buzzes.length === 0 &&
+                (!state.buzzState || Object.keys(state.buzzState).length === 0)) {
+            console.log('Reset detected via empty buzzes and buzzState');
+            hasBuzzed = false;
         } else {
-            hasBuzzed = state.buzzes?.some((buzz: Buzz) => buzz.playerName === playerName) || false;
+            // Check if player is in the buzz list
+            const isInBuzzList = state.buzzes?.some((buzz: Buzz) => buzz.playerName === playerName);
+            const isInBuzzState = state.buzzState && state.buzzState[playerName];
+
+            console.log('Buzz status check:', { isInBuzzList, isInBuzzState, playerName });
+            hasBuzzed = isInBuzzList || isInBuzzState || false;
         }
+    });
+
+    // Make this handler more explicit
+    socket?.on('buzz-reset', () => {
+        console.log('Direct buzz-reset received');
+        hasBuzzed = false;
+        // Force UI update
+        hasBuzzed = false;
     });
 
     socket?.on('kicked-from-game', () => {

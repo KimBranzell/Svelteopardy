@@ -3,8 +3,8 @@
 	"version": "0.0.1",
 	"type": "module",
 	"imports": {
-    "#*": "./*"
-  },
+		"#*": "./*"
+	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
@@ -47,5 +47,12 @@
 	"dependencies": {
 		"socket.io": "^4.8.1",
 		"socket.io-client": "^4.8.1"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"@sveltejs/kit",
+			"esbuild",
+			"svelte-preprocess"
+		]
 	}
 }

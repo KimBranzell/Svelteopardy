@@ -283,21 +283,39 @@ io.on('connection', socket => {
         if (game && game.hostId === socket.id) {
             // Clear buzzes
             game.buzzes = [];
+            // Reset buzz state for all players
+            game.buzzState = {};
+            // Increment reset counter to trigger client-side resets
+            game.resetCount = (game.resetCount || 0) + 1;
 
             // First update the host's view
             socket.emit('players-updated', game.players);
 
-            // Then send the complete state update to all clients
+            // Add debug logs
+            console.log('Buzzer reset for game:', gameId);
+            console.log('New resetCount:', game.resetCount);
+            console.log('Sending buzz-reset to room');
+
+            // Send specific buzz-reset event to all clients in the room
+            io.to(gameId).emit('buzz-reset');
+
+            // Then send the complete state update with correct empty arrays
             const fullState = {
                 players: game.players,
                 kickedPlayers: kickedPlayers.get(gameId) || [],
                 hostId: game.hostId,
                 started: game.started,
-                buzzes: []
+                buzzes: game.buzzes, // This should be an empty array now
+                buzzState: game.buzzState, // This should be an empty object now
+                resetCount: game.resetCount
             };
 
-            io.to(gameId).emit('game-state-updated', fullState);
-            }
+            // Delay the game-state-updated to ensure buzz-reset is processed first
+            setTimeout(() => {
+                console.log('Sending delayed game-state-updated with resetCount:', game.resetCount);
+                io.to(gameId).emit('game-state-updated', fullState);
+            }, 100);
+        }
     });
 });
 
