@@ -23,7 +23,8 @@ function createGameState(hostId) {
         lastActivity: Date.now(),
         buzzes: [],
         resetCount: 0,
-        buzzState: {}  // Initialize the buzzState object
+        buzzState: {},
+        scores: {}
     };
 }
 
@@ -36,7 +37,11 @@ function updateGameState(gameId) {
             players: game.players,
             kickedPlayers: kickedPlayers.get(gameId) || [],
             started: game.started,
-            hostId: game.hostId
+            hostId: game.hostId,
+            buzzes: game.buzzes,
+            buzzState: game.buzzState,
+            resetCount: game.resetCount,
+            scores: game.scores  // Include scores in game state
         };
         io.to(gameId).emit('game-state-updated', gameState);
     }
@@ -315,6 +320,32 @@ io.on('connection', socket => {
                 console.log('Sending delayed game-state-updated with resetCount:', game.resetCount);
                 io.to(gameId).emit('game-state-updated', fullState);
             }, 100);
+        }
+    });
+
+    socket.on('update-score', ({ gameId, playerName, points, absolute = false }) => {
+        const game = games.get(gameId);
+        if (game && game.hostId === socket.id) {
+            // Initialize score for player if it doesn't exist
+            if (game.scores[playerName] === undefined) {
+                game.scores[playerName] = 0;
+            }
+
+            // Update score - either add/subtract points or set to absolute value
+            if (absolute) {
+                game.scores[playerName] = points;
+            } else {
+                game.scores[playerName] += points;
+            }
+
+            // Track last activity
+            game.lastActivity = Date.now();
+
+            // Broadcast updated scores to all clients
+            io.to(gameId).emit('scores-updated', game.scores);
+
+            // Also include scores in the game state update
+            updateGameState(gameId);
         }
     });
 });

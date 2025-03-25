@@ -15,6 +15,7 @@
     let hasBuzzed = false;
     let lastResetTimestamp = 0;
     let lastResetCount = 0;
+    let scores: Record<string, number> = {};
 
     function buzz() {
         if (!hasBuzzed && gameStarted) {
@@ -95,6 +96,8 @@
 
         gameStarted = state.started;
 
+        scores = state.scores || {};
+
         // More explicit check for buzz reset
         if (state.resetCount && state.resetCount > lastResetCount) {
             console.log('Reset detected via resetCount');
@@ -112,6 +115,10 @@
             console.log('Buzz status check:', { isInBuzzList, isInBuzzState, playerName });
             hasBuzzed = isInBuzzList || isInBuzzState || false;
         }
+    });
+
+    socket?.on('scores-updated', (updatedScores) => {
+        scores = updatedScores;
     });
 
     // Make this handler more explicit
@@ -155,6 +162,17 @@
             {#if gameStarted}
                 <div class="game-view">
                     <h2>Game Started!</h2>
+                    <div class="scores-panel">
+                        <h3>Scores</h3>
+                        <div class="scores-container">
+                            {#each Object.entries(scores) as [playerName, score]}
+                                <div class="player-score" class:my-score={playerName === playerName}>
+                                    <span class="player-name">{playerName}</span>
+                                    <span class="score">${score}</span>
+                                </div>
+                            {/each}
+                        </div>
+                    </div>
                     <div class="buzzer-container">
                         <button
                             class="buzzer"
@@ -277,5 +295,43 @@
 
     .waiting-room {
         text-align: center;
+    }
+
+    .scores-panel {
+        margin-bottom: 20px;
+        padding: 10px;
+        background-color: #f0f0f0;
+        border-radius: 5px;
+    }
+
+    .scores-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+    }
+
+    .player-score {
+        padding: 8px;
+        background-color: #fff;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        min-width: 100px;
+        text-align: center;
+    }
+
+    .my-score {
+        border-color: #0077cc;
+        background-color: #e6f2ff;
+    }
+
+    .player-name {
+        font-weight: bold;
+        display: block;
+    }
+
+    .score {
+        font-size: 1.2rem;
+        color: #0077cc;
     }
 </style>

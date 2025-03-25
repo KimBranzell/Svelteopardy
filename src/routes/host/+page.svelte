@@ -12,6 +12,9 @@
     let kickedPlayers: string[] = [];
     let buzzes: Array<{playerName: string, position: number}> = [];
     let gameStarted = false;
+    let scores: Record<string, number> = {};
+    let selectedPlayer: string | null = null;
+    let pointAmount = 100; // Default point amount
 
 
     gameId.subscribe(value => {
@@ -113,6 +116,11 @@
             playerName: buzz.playerName,
             position: index + 1
         }));
+        scores = state.scores || {};
+    });
+
+    socket?.on('scores-updated', (updatedScores) => {
+        scores = updatedScores;
     });
 
     socket?.on('game-not-found', () => {
@@ -129,6 +137,39 @@
     socket?.on('buzz-received', (buzz) => {
         buzzes = [...buzzes, buzz];
     });
+
+    function awardPoints() {
+        if (selectedPlayer && $gameId) {
+            socket?.emit('update-score', {
+                gameId: $gameId,
+                playerName: selectedPlayer,
+                points: pointAmount
+            });
+        }
+    }
+
+    function deductPoints() {
+        if (selectedPlayer && $gameId) {
+            socket?.emit('update-score', {
+                gameId: $gameId,
+                playerName: selectedPlayer,
+                points: -pointAmount
+            });
+        }
+    }
+
+    function resetScores() {
+        if ($gameId) {
+            connectedPlayers.forEach(player => {
+                socket?.emit('update-score', {
+                    gameId: $gameId,
+                    playerName: player.name,
+                    points: 0,
+                    absolute: true
+                });
+            });
+        }
+    }
 </script>
 
 <main class="container">
@@ -171,6 +212,53 @@
                             {:else}
                                 <p>Waiting for players to buzz...</p>
                             {/if}
+                        </div>
+
+                        <div class="score-management">
+                            <h2>Score Management</h2>
+
+                            <div class="score-display">
+                                {#each connectedPlayers as player}
+                                    <div class="player-score"
+                                         class:selected={selectedPlayer === player.name}
+                                         on:click={() => selectedPlayer = player.name}>
+                                        <span class="player-name">{player.name}</span>
+                                        <span class="score">${scores[player.name] || 0}</span>
+                                    </div>
+                                {/each}
+                            </div>
+
+                            <div class="score-controls">
+                                <div class="point-selector">
+                                    <label>Points:</label>
+                                    <select bind:value={pointAmount}>
+                                        <option value={100}>100</option>
+                                        <option value={200}>200</option>
+                                        <option value={300}>300</option>
+                                        <option value={400}>400</option>
+                                        <option value={500}>500</option>
+                                        <option value={1000}>1000</option>
+                                    </select>
+                                </div>
+
+                                <button
+                                    class="award-button"
+                                    disabled={!selectedPlayer}
+                                    on:click={awardPoints}>
+                                    Award Points
+                                </button>
+
+                                <button
+                                    class="deduct-button"
+                                    disabled={!selectedPlayer}
+                                    on:click={deductPoints}>
+                                    Deduct Points
+                                </button>
+
+                                <button class="reset-button" on:click={resetScores}>
+                                    Reset All Scores
+                                </button>
+                            </div>
                         </div>
                     {/if}
                 </div>
@@ -284,5 +372,67 @@
 
     button:hover {
         filter: brightness(90%);
+    }
+
+    .score-management {
+        margin-top: 20px;
+        padding: 15px;
+        background-color: #f0f0f0;
+        border-radius: 5px;
+    }
+
+    .score-display {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+
+    .player-score {
+        padding: 10px;
+        background-color: #fff;
+        border: 2px solid #ddd;
+        border-radius: 5px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-width: 120px;
+    }
+
+    .player-score.selected {
+        border-color: #0077cc;
+        background-color: #e6f2ff;
+    }
+
+    .player-name {
+        font-weight: bold;
+    }
+
+    .score {
+        font-size: 1.5rem;
+        color: #0077cc;
+    }
+
+    .score-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+    }
+
+    .award-button {
+        background-color: #4CAF50;
+        color: white;
+    }
+
+    .deduct-button {
+        background-color: #f44336;
+        color: white;
+    }
+
+    .reset-button {
+        background-color: #555;
+        color: white;
     }
 </style>
