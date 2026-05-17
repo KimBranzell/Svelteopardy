@@ -1,9 +1,19 @@
-import { handler } from './build/handler.js';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { generateGameId } from './src/lib/utils/gameId.js';
 import { sampleGameBoard } from './src/lib/data/gameBoard.js';
+import { existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+let handler;
+if (existsSync(join(__dirname, 'build', 'handler.js'))) {
+    const build = await import('./build/handler.js');
+    handler = build.handler;
+}
 
 console.log('Sample game board loaded:', sampleGameBoard ? 'yes' : 'no');
 console.log('Categories:', sampleGameBoard?.categories?.length || 0);
@@ -29,6 +39,7 @@ function createGameState(hostId) {
         buzzes: [],
         resetCount: 0,
         buzzState: {},
+        buzzerAttempts: [],
         scores: {},
         gameBoard: JSON.parse(JSON.stringify(sampleGameBoard)), // Deep copy
         currentQuestion: null
@@ -47,6 +58,7 @@ function updateGameState(gameId) {
             hostId: game.hostId,
             buzzes: game.buzzes,
             buzzState: game.buzzState,
+            buzzerAttempts: game.buzzerAttempts || [],
             resetCount: game.resetCount,
             scores: game.scores || {},
             gameBoard: game.gameBoard,  // Make sure this is included
@@ -95,7 +107,9 @@ function removeGame(gameId) {
 // Run cleanup every hour
 setInterval(cleanupInactiveGames, 60 * 60 * 1000);
 
-app.use(handler);
+if (handler) {
+    app.use(handler);
+}
 
 io.on('connection', socket => {
     if (!socket.handshake.headers.referer?.includes('vite')) {
@@ -117,19 +131,28 @@ io.on('connection', socket => {
     socket.on('end-game', (gameId) => {
         const game = games.get(gameId);
         if (game && game.hostId === socket.id) {
-            // Notify all players in the game
-            io.to(gameId).emit('game-ended');
+            const scores = game.scores || {};
+            const players = game.players.map(p => ({
+                name: p.name,
+                score: scores[p.name] || 0
+            }));
+            players.sort((a, b) => b.score - a.score);
+            const winner = players.length > 0 ? players[0].name : null;
 
-            // Clean up player sessions
+            io.to(gameId).emit('game-ended', {
+                winner,
+                finalScores: scores,
+                rankings: players
+            });
+
             game.players.forEach(player => {
                 playerSessions.delete(player.id);
             });
 
-            // Remove game data
             games.delete(gameId);
             kickedPlayers.delete(gameId);
 
-            log(`Game ${gameId} ended by host`);
+            log(`Game ${gameId} ended by host. Winner: ${winner || 'none'}`);
         }
     });
 
@@ -206,7 +229,12 @@ io.on('connection', socket => {
                     players: game.players,
                     kickedPlayers: kickedPlayers.get(playerSession.gameId),
                     hostId: game.hostId,
-                    started: game.started
+                    started: game.started,
+                    gameBoard: game.gameBoard,
+                    currentQuestion: game.currentQuestion,
+                    buzzes: game.buzzes,
+                    buzzerAttempts: game.buzzerAttempts || [],
+                    scores: game.scores || {}
                 };
 
                 io.to(playerSession.gameId).emit('game-state-updated', gameState);
@@ -228,6 +256,29 @@ io.on('connection', socket => {
                 io.to(gameId).emit('players-updated', game.players);
                 log(`Player ${playerName} was reinvited to game ${gameId}`);
             }
+        }
+    });
+
+    socket.on('join-audience', (gameId) => {
+        const game = games.get(gameId);
+        if (game) {
+            socket.join(gameId);
+            socket.emit('audience-joined', gameId);
+            socket.emit('game-state-updated', {
+                players: game.players,
+                kickedPlayers: kickedPlayers.get(gameId) || [],
+                hostId: game.hostId,
+                started: game.started,
+                buzzes: game.buzzes,
+                buzzState: game.buzzState,
+                buzzerAttempts: game.buzzerAttempts || [],
+                resetCount: game.resetCount,
+                scores: game.scores || {},
+                gameBoard: game.gameBoard,
+                currentQuestion: game.currentQuestion
+            });
+        } else {
+            socket.emit('game-not-found');
         }
     });
 
@@ -269,14 +320,23 @@ io.on('connection', socket => {
                     kickedPlayers: kickedPlayers.get(gameId) || [],
                     hostId: game.hostId,
                     started: game.started,
-                    buzzes: game.buzzes
+                    buzzes: game.buzzes,
+                    buzzerAttempts: game.buzzerAttempts || [],
+                    scores: game.scores || {},
+                    gameBoard: game.gameBoard,
+                    currentQuestion: game.currentQuestion
                 });
             } else if (playerName) {
                 socket.join(gameId);
+                socket.emit('joined-game', gameId);
                 socket.emit('player-state-sync', {
                     gameStarted: game.started,
-                    hasBuzzed: game.buzzes.some(buzz => buzz.playerName === playerName)
+                    hasBuzzed: game.buzzes.some(buzz => buzz.playerName === playerName),
+                    buzzerAttempts: game.buzzerAttempts || []
                 });
+                if (game.started) {
+                    updateGameState(gameId);
+                }
             }
         }
     });
@@ -287,20 +347,16 @@ io.on('connection', socket => {
 
     socket.on('player-buzz', ({ gameId, playerName }) => {
         const game = games.get(gameId);
-        if (game && game.started) {
+        if (game && game.started && game.currentQuestion) {
+            if (game.buzzerAttempts.includes(playerName)) return;
             game.buzzState[playerName] = true;
             game.buzzes.push({
                 playerName,
                 timestamp: Date.now()
             });
-            io.to(gameId).emit('game-state-updated', {
-                players: game.players,
-                kickedPlayers: kickedPlayers.get(gameId) || [],
-                hostId: game.hostId,
-                started: game.started,
-                buzzes: game.buzzes,
-                buzzState: game.buzzState
-            });
+            game.buzzerAttempts.push(playerName);
+            game.lastActivity = Date.now();
+            updateGameState(gameId);
         }
     });
 
@@ -334,6 +390,7 @@ io.on('connection', socket => {
                 started: game.started,
                 buzzes: game.buzzes,
                 buzzState: game.buzzState,
+                buzzerAttempts: game.buzzerAttempts || [],
                 resetCount: game.resetCount,
                 scores: game.scores || {},
                 gameBoard: game.gameBoard,
@@ -351,50 +408,76 @@ io.on('connection', socket => {
     socket.on('update-score', ({ gameId, playerName, points, absolute = false }) => {
         const game = games.get(gameId);
         if (game && game.hostId === socket.id) {
-            // Initialize score for player if it doesn't exist
             if (game.scores[playerName] === undefined) {
                 game.scores[playerName] = 0;
             }
 
-            // Update score - either add/subtract points or set to absolute value
             if (absolute) {
                 game.scores[playerName] = points;
             } else {
                 game.scores[playerName] += points;
             }
 
-            // Track last activity
             game.lastActivity = Date.now();
 
-            // Broadcast updated scores to all clients
-            io.to(gameId).emit('scores-updated', game.scores);
+            if (game.currentQuestion && points !== 0 && !absolute) {
+                const outcome = points > 0 ? 'correct' : 'incorrect';
+                io.to(gameId).emit('answer-result', {
+                    playerName,
+                    points,
+                    outcome
+                });
+                if (outcome === 'incorrect') {
+                    game.buzzes = [];
+                    game.buzzState = {};
+                    setTimeout(() => {
+                        io.to(gameId).emit('buzz-reset');
+                        updateGameState(gameId);
+                    }, 100);
+                }
+            }
 
-            // Also include scores in the game state update
+            io.to(gameId).emit('scores-updated', game.scores);
             updateGameState(gameId);
         }
     });
 
-    // Update the select-question handler
     socket.on('select-question', ({ gameId, categoryIndex, questionIndex }) => {
         const game = games.get(gameId);
         if (game && game.hostId === socket.id) {
             const category = game.gameBoard.categories[categoryIndex];
             const question = category?.questions[questionIndex];
 
-            if (question && !question.revealed) {
-                // Mark the question as revealed
+            if (question && !question.revealed && !question.answered) {
                 question.revealed = true;
 
-                // Set as current question
                 game.currentQuestion = {
                     categoryIndex,
                     questionIndex,
                     text: question.text,
                     answer: question.answer,
-                    pointValue: question.pointValue
+                    pointValue: question.pointValue,
+                    categoryName: category.name
                 };
+                game.buzzerAttempts = [];
 
-                // Update game state
+                updateGameState(gameId);
+            }
+        }
+    });
+
+    socket.on('mark-question-answered', ({ gameId, categoryIndex, questionIndex }) => {
+        const game = games.get(gameId);
+        if (game && game.hostId === socket.id) {
+            const category = game.gameBoard.categories[categoryIndex];
+            const question = category?.questions[questionIndex];
+
+            if (question) {
+                question.answered = true;
+                game.currentQuestion = null;
+                game.buzzes = [];
+                game.buzzState = {};
+                game.buzzerAttempts = [];
                 updateGameState(gameId);
             }
         }

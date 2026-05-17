@@ -6,7 +6,7 @@
 		"#*": "./*"
 	},
 	"scripts": {
-		"dev": "vite dev",
+		"dev": "node server.js & vite dev; kill $! 2>/dev/null",
 		"build": "vite build",
 		"preview": "vite preview",
 		"start": "node server.js",
